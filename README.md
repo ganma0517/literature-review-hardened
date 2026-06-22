@@ -6,14 +6,73 @@ A Claude Code skill for writing academic **literature reviews** under a strict *
 
 > ⚠️ **It targets one part of academic writing — the literature review** (the Literature Review / Related Work / Theoretical Framework section, or a standalone narrative review/survey). It does **not** cover Methods/Results/empirical Discussion, and does **not** replace a formal PRISMA systematic review or meta-analysis.
 
-## What it adds (anti-hallucination, layered defense)
+## Workflow / 流程圖
 
-- **Mandatory grounding** — search real sources with tools before writing; never from memory.
-- **Per-claim verification** — the unit is the *claim–citation pair*, not just the source.
-- **"Evidence-or-it-didn't-happen"** — every check (existence, DOI resolve, support) needs an actual captured tool return logged in an audit trail; no record ⇒ stays `CANDIDATE`.
-- **Existence ≠ support** — catches the subtle "real paper, fabricated claim" failure via locator + greppable excerpt.
-- **Status state machine** — `CANDIDATE → EXISTS_ONLY → SUPPORTED`, with off-ramps `SUPPORT_UNCONFIRMED / UNSUPPORTED / REJECTED`, each mapped to an in-text marker. Only `SUPPORTED` may enter the body / References.
-- **Auditable "Claim–Citation Verification Table"** attached to every output.
+The skill runs **verify-first**: nothing is written until each claim's citation has cleared the verification layer.
+
+```mermaid
+flowchart TD
+    A[Define question &amp; scope<br/>定題與範圍] --> B[Mandatory retrieval<br/>用真實工具檢索, 不靠記憶]
+    B --> C[Evaluate &amp; select sources<br/>評估與選取]
+    C --> D[Outline the claims<br/>列出每個論點]
+    D --> E[For EACH claim–citation pair:<br/>run Citation Verification Layer<br/>逐筆 claim 跑查證層]
+    E --> F{&#9312; exists? &#9313; DOI resolves?<br/>&#9314; retraction? &#9315; red-flag?<br/>each needs a &#9317; tool-return}
+    F -->|no record / not found| R[REJECTED → off body<br/>進 audit log]
+    F -->|yes| G{&#9316; supports THIS claim?<br/>locator + greppable excerpt}
+    G -->|not checked yet| U1[SUPPORT_UNCONFIRMED]
+    G -->|checked, no support| U2[UNSUPPORTED]
+    G -->|yes| S[SUPPORTED ✅]
+    S --> H[Write body using ONLY ✅ pairs<br/>正文只用已查證對齊的引用]
+    H --> I[Final self-check:<br/>scan every in-text citation form]
+    I --> J[Deliver: review + References ✅ only<br/>+ Claim–Citation Verification Table<br/>+ Open verification issues appendix]
+    R -.-> J
+    U1 -.appendix.-> J
+    U2 -.appendix.-> J
+```
+
+## Anti-hallucination mechanism / 防範幻覺機制
+
+Hallucination is intercepted by **multiple independent gates**; a citation reaches the body only after clearing all of them.
+
+| # | Defense line | Intercepts | Mechanism |
+|---|---|---|---|
+| 1 | Mandatory grounding | Inventing bibliography from memory | Retrieve real sources with tools before writing |
+| 2 | Existence check | Fake bibliography / wrong DOI | ①② — title·author·year·venue + **actually resolve** the DOI/ID |
+| 3 | Retraction / red-flag screen | Citing retracted work, AI-chat links, predatory journals | ③④ |
+| 4 | Claim-to-citation alignment | **Real paper, fabricated claim** (most subtle) | ⑤ — exact locator + greppable excerpt, else not cited |
+| 5 | Citation-drift guard | Wrong paper / preprint↔published / versions | Pin a unique ID (DOI/PMID/arXiv/ISBN/URL) |
+| 6 | Stated vs. interpreted split | Passing model inference off as the source's words | "Stated" needs a backing locator; interpretation marked explicitly |
+| 7 | Over-claim gate | Over-linear causal chains, absolute claims | Qualify scope/conditions, else `[scope-unclear/recheck]` |
+| 8 | Uncertain → leave blank | Filling gaps with plausible fabrication | No source ⇒ `[needs-retrieval/unverified]`, never invent |
+| 9 | **Evidence-or-it-didn't-happen** | Claiming "verified" without doing it | Every check needs a captured ⑥ tool-return; no record ⇒ stays `CANDIDATE` |
+| 10 | Pre-submission full scan | Stray placeholders, unaligned citations | Reconcile every in-text citation against the table |
+
+### Status state machine / 狀態機
+
+The unit of verification is the **claim–citation pair**. Only `SUPPORTED` may enter the body and References; everything else is parked with an in-text marker or in the audit log.
+
+```mermaid
+stateDiagram-v2
+    [*] --> CANDIDATE
+    CANDIDATE --> EXISTS_ONLY: passed ①②③④<br/>(each with a ⑥ tool-return)
+    CANDIDATE --> REJECTED: not found / red-flag / retracted
+    EXISTS_ONLY --> SUPPORTED: ⑤ ok (L3 locator+excerpt)<br/>or pure existence·L1
+    EXISTS_ONLY --> SUPPORT_UNCONFIRMED: support not yet checked
+    EXISTS_ONLY --> UNSUPPORTED: checked, no supporting passage
+    SUPPORTED --> [*]: body-eligible → References
+    REJECTED --> [*]: audit log only
+    SUPPORT_UNCONFIRMED --> [*]: appendix, never body
+    UNSUPPORTED --> [*]: appendix, never body
+```
+
+| Status | In-text marker | Body-eligible? |
+|---|---|---|
+| `SUPPORTED` | *(none — real citation)* | ✅ yes |
+| `CANDIDATE` | `[needs-retrieval/unverified]` | ❌ |
+| `EXISTS_ONLY` (content claim) | `[support-unconfirmed/recheck]` | ❌ (relabel to SUPPORTED first) |
+| `SUPPORT_UNCONFIRMED` | `[support-unconfirmed/recheck]` | ❌ |
+| `UNSUPPORTED` | `[source-does-not-support/recheck]` | ❌ |
+| `REJECTED` | `[needs-retrieval/unverified]` | ❌ |
 
 ### Honest ceiling / 根本極限
 
