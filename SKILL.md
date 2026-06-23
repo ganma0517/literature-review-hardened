@@ -1,6 +1,7 @@
 ---
 name: literature-review-hardened
-description: Helps users write high-quality literature reviews (standalone review papers or the literature-review section of a research paper) under a strict "verify-first, never fabricate" regime. Covers a specific part of academic writing — the literature review: depending on discipline/venue it appears in the Introduction or as a separate "Literature Review / Related Work / Theoretical Framework" section before Methods; as a standalone genre it is the entire narrative review/survey article (it does not replace a formal PRISMA systematic review or meta-analysis protocol). Provides end-to-end guidance from topic selection, literature search, evaluation, structure planning, to writing, with built-in anti-hallucination defenses: search before writing, per-claim verification of DOI/retraction, claim-to-citation alignment, and an auditable "Citation Verification Table." Use when the writing must cite only real, checkable sources and must not fabricate citations.
+description: |
+  Helps users write high-quality literature reviews (standalone review papers or the literature-review section of a research paper) under a strict "verify-first, never fabricate" regime. Covers a specific part of academic writing — the literature review: depending on discipline/venue it appears in the Introduction or as a separate "Literature Review / Related Work / Theoretical Framework" section before Methods; as a standalone genre it is the entire narrative review/survey article (it does not replace a formal PRISMA systematic review or meta-analysis protocol). Provides end-to-end guidance from topic selection, literature search, evaluation, structure planning, to writing, with built-in anti-hallucination defenses: search before writing, per-claim verification of DOI/retraction, claim-to-citation alignment, and an auditable "Citation Verification Table." Use when the writing must cite only real, checkable sources and must not fabricate citations.
 ---
 
 # Literature Review Writing Skill (Anti-Hallucination Hardened v2)
@@ -229,6 +230,25 @@ Future research could pursue: 1) [direction 1] 2) [direction 2]
 | ⑤ **Claim support (this version's focus)** | Does the source **actually support this specific claim**? Attach an **exact locator** (page / section / paragraph / figure-table no. / article-locator / timestamp) **plus a verbatim excerpt** from that locator. For **every L3 content claim** the excerpt must be **greppable in the retrieved text** (paraphrase in prose is fine, but the ⑥ record must hold the real supporting words) — a bare locator like "p.12" with no reproducible excerpt does **not** pass. Specifics (results, numbers, methods) need an **L3** locator; abstract-only support is `abstract-only` and limited to high-level claims. If checked and unsupported → `UNSUPPORTED`; if not yet checkable → `SUPPORT_UNCONFIRMED`; either way do not cite for that claim |
 | ⑥ **Auditable evidence trail** | Log retrieval source (database/URL/accession), method, the tool return, and the supporting excerpt, so every "verified" has a traceable record — not a mere verbal claim. **A claim–citation pair with no ⑥ record cannot leave `CANDIDATE`.** |
 
+### Helper script: `scripts/verify_refs.py` (automates ①②, and the drift guard for #5)
+
+A deterministic, dependency-free checker (stdlib only) that resolves each citation against **Crossref / doi.org** and returns the **authoritative** title/author/venue/volume/pages. Use it to mechanize the existence + DOI-resolution gates and to catch **author drift / same-name confusion** before writing.
+
+```bash
+python3 scripts/verify_refs.py refs.json    # each item: {id, authors, year, title, journal, doi}
+```
+
+Verdicts → how they map to this layer:
+- `VERIFIED` — title+author+year matched → satisfies ① and ②. Transcribe the citation **only from the returned `authoritative` fields**, never from memory.
+- `AUTHOR_MISMATCH` — title matches but the author you supplied differs from the resolved record (the classic "real paper, wrong author" drift, Hard Rule #5) → fix to the authoritative author; do **not** cite until corrected.
+- `AUTHOR_UNKNOWN` / `NOT_INDEXED` — work exists but machine-readable metadata lacks authors (common for Chinese/Airiti `10.3966`, some books) → fetch the actual article/publisher page with a tool and read the **real author**; never carry an author from memory.
+- `DOI_INVALID` — does not resolve anywhere → treat as likely fabricated (`REJECTED`).
+- `NOT_FOUND` — not in Crossref → go manual (ISBN/stable URL/database accession), per ②'s "no DOI ≠ doesn't exist."
+
+> ⚠ **Pass a DOI whenever you have one.** With no DOI the script runs Crossref **query mode**, which for **generic titles** ("Strategic Ambiguity", "Casino Capitalism", "Small State Foreign Policy") often matches a *same-titled work by a different author*, producing **false** `AUTHOR_MISMATCH`/`YEAR_MISMATCH`. Treat query-mode mismatches as "manually re-check via the correct DOI," **not** as proof the citation is wrong — the original is frequently correct. Pre-filling DOIs in refs.json eliminates these false alarms.
+
+> **Scope limit (important):** this script verifies **existence + bibliographic correctness + author drift only**. It does **not** read full text and therefore **cannot** satisfy **⑤ claim-support** — a `VERIFIED` here still maps to `EXISTS_ONLY`, not `SUPPORTED`. Claim-to-citation alignment (⑤) and the ⑥ excerpt remain mandatory, manual, and per-claim. The script raises the cost of fabricated *bibliography*; it does not certify that a real source *supports your sentence*.
+
 ### Status lifecycle (use these exact labels)
 `CANDIDATE` → `EXISTS_ONLY` (passed ①②③④, each with a ⑥ tool-return record) → `SUPPORTED` (also passed ⑤ for that claim) → **body-eligible**.
 Off-ramps: `SUPPORT_UNCONFIRMED` (exists, but support **not yet** checked / full text not yet read) · `UNSUPPORTED` (full text **was** checked and contains no passage supporting the claim — includes the strong case where the source explicitly contradicts it) · `REJECTED` (does not exist / red-flagged / retracted).
@@ -312,7 +332,7 @@ Appendix: Open verification issues / audit log (unresolved or rejected candidate
 2. **Mandatory retrieval:** fetch a real source list with tools (Step 1.3).
 3. **Evaluate & select:** relevance / credibility / impact / field-sensitive recency.
 4. **Identify themes, trends, controversies, gaps.**
-5. **Outline claims** and, **for each claim, run the Citation Verification Layer first** → build the Claim–Citation Verification Table.
+5. **Outline claims** and, **for each claim, run the Citation Verification Layer first** → build the Claim–Citation Verification Table. (Mechanize existence/DOI/author-drift with `scripts/verify_refs.py`; claim-support ⑤ stays manual.)
 6. **Write the body using only `SUPPORTED` (✅) pairs** (intro/body/conclusion templates); claims still unresolved stay marked, not silently dropped.
 7. **Final self-check & deliver:** body + References (SUPPORTED only) + verification table + "Open verification issues" appendix; in a **final** draft no unresolved markers remain in the body.
 
